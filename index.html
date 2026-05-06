@@ -728,7 +728,7 @@ function lsSaveAll(files){
     const data=files.map((f,i)=>({
       id:f.dbId||i+1,
       name:f.name,size:f.size,type:f.type,
-      textC:LZ.compress(f.text),
+      textC:f.text?LZ.compress(f.text):(f.textC||''),
       pages:f.pages,words:f.words,
       savedAt:f.savedAt||Date.now(),
       lastOpen:f.lastOpen||Date.now()
@@ -825,7 +825,15 @@ async function dbClear(){
 }
 
 async function dbLoadAll(){
-  // حاول IndexedDB أولاً
+  // localStorage أولاً - دايماً موجود ومضمون
+  try{
+    const raw=localStorage.getItem(LS_KEY);
+    if(raw){
+      const parsed=JSON.parse(raw);
+      if(parsed&&parsed.length) return parsed;
+    }
+  }catch(e){}
+  // fallback: IndexedDB
   if(db){
     try{
       return await new Promise((res,rej)=>{
@@ -836,11 +844,7 @@ async function dbLoadAll(){
       });
     }catch(e){db=null;}
   }
-  // fallback: localStorage
-  try{
-    const raw=localStorage.getItem(LS_KEY);
-    return raw?JSON.parse(raw):[];
-  }catch(e){return[];}
+  return [];
 }
 
 async function calcStorageUsed(){
@@ -1075,9 +1079,9 @@ async function processFile(idx,rawFile){
       updateStorageUI();
     }catch(dbErr){
       console.warn('DB save failed:',dbErr);
-      // حاول localStorage كـ backup
-      try{ lsSaveAll(state.files); }catch(e2){}
     }
+    // دايماً احفظ في localStorage كـ backup
+    try{ lsSaveAll(state.files); }catch(e2){}
 
     check();
 
