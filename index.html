@@ -717,83 +717,130 @@ function normalizeAr(s){
 }
 
 // ══════════════════════════════════════════
-// IndexedDB — DB version 3
+// Storage — localStorage fallback (works on file:// AND https://)
 // ══════════════════════════════════════════
-const DB_NAME='DocReaderV4';
-const DB_VER=4;
-const STORE='files';
-let db=null;
+const LS_KEY='DocReaderV5_files';
+let db=null; // kept for compatibility
+
+// حفظ كل الملفات في localStorage
+function lsSaveAll(files){
+  try{
+    const data=files.map((f,i)=>({
+      id:f.dbId||i+1,
+      name:f.name,size:f.size,type:f.type,
+      textC:LZ.compress(f.text),
+      pages:f.pages,words:f.words,
+      savedAt:f.savedAt||Date.now(),
+      lastOpen:f.lastOpen||Date.now()
+    }));
+    localStorage.setItem(LS_KEY,JSON.stringify(data));
+  }catch(e){console.warn('LS save fail',e);}
+}
 
 async function openDB(){
-  return new Promise((res,rej)=>{
-    const req=indexedDB.open(DB_NAME,DB_VER);
-    req.onupgradeneeded=e=>{
-      const d=e.target.result;
-      if(!d.objectStoreNames.contains(STORE))
-        d.createObjectStore(STORE,{keyPath:'id',autoIncrement:true});
-    };
-    req.onsuccess=e=>{db=e.target.result;res(db);};
-    req.onerror=e=>{console.warn('IDB',e);rej(e);};
-  });
+  // نحاول IndexedDB أولاً، لو فشل نكمل بـ localStorage
+  try{
+    await new Promise((res,rej)=>{
+      const req=indexedDB.open('DocReaderV4',4);
+      req.onsuccess=e=>{db=e.target.result;res();};
+      req.onerror=()=>rej();
+      req.onupgradeneeded=e=>{
+        const d=e.target.result;
+        if(!d.objectStoreNames.contains('files'))
+          d.createObjectStore('files',{keyPath:'id',autoIncrement:true});
+      };
+    });
+  }catch(e){db=null;}
 }
 
 async function dbSave(entry){
-  if(!db)return;
-  return new Promise((res,rej)=>{
-    const tx=db.transaction(STORE,'readwrite');
-    const data={
-      name:entry.name,size:entry.size,type:entry.type,
-      textC:LZ.compress(entry.text),
-      pages:entry.pages,words:entry.words,
-      savedAt:Date.now(),lastOpen:Date.now()
-    };
-    const req=tx.objectStore(STORE).add(data);
-    req.onsuccess=e=>{entry.dbId=e.target.result;res(e.target.result);};
-    req.onerror=rej;
-  });
+  entry.dbId=entry.dbId||(Date.now()+Math.random());
+  entry.savedAt=entry.savedAt||Date.now();
+  entry.lastOpen=Date.now();
+  // حاول IndexedDB
+  if(db){
+    try{
+      await new Promise((res,rej)=>{
+        const tx=db.transaction('files','readwrite');
+        const data={name:entry.name,size:entry.size,type:entry.type,
+          textC:LZ.compress(entry.text),pages:entry.pages,words:entry.words,
+          savedAt:entry.savedAt,lastOpen:entry.lastOpen};
+        const req=tx.objectStore('files').add(data);
+        req.onsuccess=e=>{entry.dbId=e.target.result;res();};
+        req.onerror=rej;
+      });
+      return entry.dbId;
+    }catch(e){db=null;}
+  }
+  // fallback: localStorage
+  lsSaveAll(state.files);
+  return entry.dbId;
 }
 
 async function dbTouch(dbId){
-  if(!db||!dbId)return;
-  return new Promise((res,rej)=>{
-    const tx=db.transaction(STORE,'readwrite');
-    const store=tx.objectStore(STORE);
-    const req=store.get(dbId);
-    req.onsuccess=e=>{
-      const rec=e.target.result;
-      if(rec){rec.lastOpen=Date.now();store.put(rec);}
-      res();
-    };
-    req.onerror=rej;
-  });
+  if(db){
+    try{
+      await new Promise((res,rej)=>{
+        const tx=db.transaction('files','readwrite');
+        const store=tx.objectStore('files');
+        const req=store.get(dbId);
+        req.onsuccess=e=>{
+          const rec=e.target.result;
+          if(rec){rec.lastOpen=Date.now();store.put(rec);}
+          res();
+        };
+        req.onerror=rej;
+      });
+      return;
+    }catch(e){db=null;}
+  }
+  lsSaveAll(state.files);
 }
 
 async function dbDelete(dbId){
-  if(!db||!dbId)return;
-  return new Promise((res,rej)=>{
-    const tx=db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).delete(dbId);
-    tx.oncomplete=res;tx.onerror=rej;
-  });
+  if(db){
+    try{
+      await new Promise((res,rej)=>{
+        const tx=db.transaction('files','readwrite');
+        tx.objectStore('files').delete(dbId);
+        tx.oncomplete=res;tx.onerror=rej;
+      });
+      return;
+    }catch(e){db=null;}
+  }
+  lsSaveAll(state.files);
 }
 
 async function dbClear(){
-  if(!db)return;
-  return new Promise((res,rej)=>{
-    const tx=db.transaction(STORE,'readwrite');
-    tx.objectStore(STORE).clear();
-    tx.oncomplete=res;tx.onerror=rej;
-  });
+  if(db){
+    try{
+      await new Promise((res,rej)=>{
+        const tx=db.transaction('files','readwrite');
+        tx.objectStore('files').clear();
+        tx.oncomplete=res;tx.onerror=rej;
+      });
+    }catch(e){db=null;}
+  }
+  localStorage.removeItem(LS_KEY);
 }
 
 async function dbLoadAll(){
-  if(!db)return[];
-  return new Promise((res,rej)=>{
-    const tx=db.transaction(STORE,'readonly');
-    const req=tx.objectStore(STORE).getAll();
-    req.onsuccess=e=>res(e.target.result);
-    req.onerror=rej;
-  });
+  // حاول IndexedDB أولاً
+  if(db){
+    try{
+      return await new Promise((res,rej)=>{
+        const tx=db.transaction('files','readonly');
+        const req=tx.objectStore('files').getAll();
+        req.onsuccess=e=>res(e.target.result);
+        req.onerror=rej;
+      });
+    }catch(e){db=null;}
+  }
+  // fallback: localStorage
+  try{
+    const raw=localStorage.getItem(LS_KEY);
+    return raw?JSON.parse(raw):[];
+  }catch(e){return[];}
 }
 
 async function calcStorageUsed(){
@@ -840,21 +887,6 @@ const resultsList=$('results-list');
 // INIT
 // ══════════════════════════════════════════
 (async()=>{
-  // اطلب تثبيت التخزين بحيث المتصفح ما يمسحوش تلقائياً
-  if(navigator.storage&&navigator.storage.persist){
-    const granted=await navigator.storage.persist();
-    if(granted){
-      console.log('✅ التخزين الدائم مفعّل');
-    } else {
-      console.warn('⚠️ التخزين الدائم غير مفعّل');
-      // نحاول مرة ثانية بعد تفاعل المستخدم
-      setTimeout(async()=>{
-        const retry=await navigator.storage.persist();
-        if(retry) toast('🔒 تم تفعيل التخزين الدائم');
-        else toast('⚠️ فعّل تثبيت الموقع للحفاظ على بياناتك');
-      }, 2000);
-    }
-  }
   await openDB();
   await loadSaved();
   showState('welcome');
@@ -1042,7 +1074,8 @@ async function processFile(idx,rawFile){
       updateStorageUI();
     }catch(dbErr){
       console.warn('DB save failed:',dbErr);
-      toast('⚠ فشل الحفظ — الملف هيتمسح لما تقفل التاب');
+      // حاول localStorage كـ backup
+      try{ lsSaveAll(state.files); }catch(e2){}
     }
 
     check();
@@ -1302,6 +1335,7 @@ async function deleteFile(e,idx){
   if(!confirm('حذف "'+f.name+'"؟'))return;
   if(f.dbId)await dbDelete(f.dbId);
   state.files.splice(idx,1);
+  lsSaveAll(state.files);
   if(state.active===idx)state.active=state.files.length?Math.max(0,idx-1):-1;
   else if(state.active>idx)state.active--;
   renderSidebar();clearSearch();
