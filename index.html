@@ -324,16 +324,54 @@ body.focus-mode #doc-area{padding:60px 80px;}
 .size-confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:499;}
 @media(max-width:640px){
   #sidebar{width:200px;}
-  #doc-area{padding:20px 18px;}
+  #doc-area{padding:16px 14px;}
   .search-opts .s-btn:nth-child(n+5){display:none;}
 }
 @media(max-width:480px){
-  #sidebar{display:none;}
-  #sidebar.mob-open{display:flex;position:fixed;inset:0;right:auto;width:80vw;z-index:200;}
-  .mob-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:199;}
-  .mob-overlay.on{display:block;}
-  #upload-fab{bottom:calc(60px + var(--safe-bot));}
+  /* ═══ LAYOUT ═══ */
+  .layout{flex-direction:row-reverse;}
+  #sidebar{display:flex!important;width:28vw;min-width:110px;max-width:140px;}
+  #hamburger{display:none!important;}
+  .mob-overlay{display:none!important;}
+
+  /* ═══ HEADER - نظفه وكبّره ═══ */
+  header{padding:8px 10px;gap:7px;flex-wrap:nowrap;}
   .logo-v{display:none;}
+
+  /* إخفاء العناصر اللي مش ضرورية في الموبايل */
+  .export-btn{display:none!important;}
+  .focus-btn{display:none;}
+  .db-badge{display:none;}
+  #install-btn{display:none!important;}
+  .file-nav-btn{display:none;}
+
+  /* شريط البحث */
+  .search-wrap{flex:1;min-width:0;}
+  .search-bar input{font-size:.9rem;padding:7px 0;}
+  .search-opts{gap:3px;}
+  /* إخفاء أزرار البحث الزيادة */
+  #diacritics-btn,#case-btn,#regex-btn,#allfiles-btn,#panel-btn{display:none;}
+  .s-btn{width:30px;height:30px;font-size:.7rem;}
+  .s-count{min-width:40px;font-size:.7rem;padding:2px 5px;}
+
+  /* ═══ SIDEBAR ═══ */
+  .sb-title{font-size:.78rem;letter-spacing:1px;}
+  .fi{padding:10px 8px;gap:8px;}
+  .fi-name{font-size:.84rem;}
+  .fi-meta{font-size:.68rem;}
+  .fi-icon{width:36px;height:36px;font-size:.68rem;}
+  .upload-area{font-size:.8rem;padding:12px 8px;line-height:1.7;}
+  .upload-sub{font-size:.68rem;}
+  .sb-icon-btn{width:26px;height:26px;}
+
+  /* ═══ DOC AREA ═══ */
+  #doc-area{padding:16px 14px;font-size:1rem;}
+
+  /* ═══ BOTTOM BAR ═══ */
+  #bottom-bar{font-size:.72rem;padding:5px 10px;}
+  .bb-btn{width:26px;height:26px;font-size:.65rem;}
+
+  #upload-fab{bottom:calc(60px + var(--safe-bot));}
 }
 </style>
 </head>
@@ -719,7 +757,7 @@ function normalizeAr(s){
 // ══════════════════════════════════════════
 // Storage — localStorage fallback (works on file:// AND https://)
 // ══════════════════════════════════════════
-const LS_KEY='DocReaderV5_files';
+const LS_KEY='DocReaderV6_files'; // v6: fixed decompress
 let db=null; // kept for compatibility
 
 // حفظ كل الملفات في localStorage
@@ -905,12 +943,27 @@ async function loadSaved(){
     if(!recs.length)return;
     recs.sort((a,b)=>a.savedAt-b.savedAt);
     recs.forEach(rec=>{
-      const text=LZ.decompress(rec.textC)||rec.text||'';
+      // حاول decompress - لو فشل استخدم النص مباشرة
+      let text='';
+      if(rec.textC){
+        const dec=LZ.decompress(rec.textC);
+        // لو decompress رجع حاجة معقولة (فيها حروف عربية أو إنجليزية)
+        if(dec&&/[\u0600-\u06FF\w]/.test(dec)){
+          text=dec;
+        } else {
+          // البيانات تالفة - تجاهل السجل ده
+          console.warn('تجاهل سجل تالف:',rec.name);
+          return;
+        }
+      } else if(rec.text){
+        text=rec.text;
+      }
+      if(!text) return;
       state.files.push({
         name:rec.name,size:rec.size,type:rec.type,
         text,pages:rec.pages,words:rec.words,
         dbId:rec.id,savedAt:rec.savedAt,lastOpen:rec.lastOpen,
-        normText:normalizeAr(text)  // يُعاد الحساب دايماً بأحدث نسخة من normalizeAr
+        normText:normalizeAr(text)
       });
     });
     if(state.files.length){
