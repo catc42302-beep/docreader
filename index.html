@@ -840,6 +840,21 @@ const resultsList=$('results-list');
 // INIT
 // ══════════════════════════════════════════
 (async()=>{
+  // اطلب تثبيت التخزين بحيث المتصفح ما يمسحوش تلقائياً
+  if(navigator.storage&&navigator.storage.persist){
+    const granted=await navigator.storage.persist();
+    if(granted){
+      console.log('✅ التخزين الدائم مفعّل');
+    } else {
+      console.warn('⚠️ التخزين الدائم غير مفعّل');
+      // نحاول مرة ثانية بعد تفاعل المستخدم
+      setTimeout(async()=>{
+        const retry=await navigator.storage.persist();
+        if(retry) toast('🔒 تم تفعيل التخزين الدائم');
+        else toast('⚠️ فعّل تثبيت الموقع للحفاظ على بياناتك');
+      }, 2000);
+    }
+  }
   await openDB();
   await loadSaved();
   showState('welcome');
@@ -876,7 +891,13 @@ async function updateStorageUI(){
   const quotaMB=info.quota?(info.quota/1048576).toFixed(0):'?';
   $('db-size-label').textContent=usedMB+'MB';
   $('storage-bar').style.display='block';
-  $('storage-used').textContent=usedMB+' / '+quotaMB+' MB';
+  let persistLabel='';
+  if(navigator.storage&&navigator.storage.persisted){
+    const isPersisted=await navigator.storage.persisted();
+    persistLabel=isPersisted?' 🔒':' ⚠️';
+    $('db-size-label').title=isPersisted?'التخزين مثبّت - بياناتك آمنة':'التخزين غير مثبّت - قد تُفقد البيانات';
+  }
+  $('storage-used').textContent=usedMB+' / '+quotaMB+' MB'+persistLabel;
   const pct=info.quota?Math.min(100,(info.used/info.quota)*100):0;
   $('storage-fg').style.width=pct+'%';
   $('storage-fg').className='storage-fg'+(pct>75?' warn':'');
