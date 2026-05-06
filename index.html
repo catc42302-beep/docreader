@@ -889,7 +889,8 @@ const resultsList=$('results-list');
 (async()=>{
   await openDB();
   await loadSaved();
-  showState('welcome');
+  // showState('welcome') فقط لو مفيش ملفات محفوظة
+  if(!state.files.length) showState('welcome');
   renderSidebar();
   updateStorageUI();
 })();
